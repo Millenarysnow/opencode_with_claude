@@ -9,8 +9,8 @@ Usage:
 - You have the capability to call multiple tools in a single response. Speculatively perform multiple independent searches as a batch when it can narrow the question faster.
 
 Output modes (parameter `output_mode`):
-- "files_with_matches" (DEFAULT): one path per file that matches — cheapest, best when you just want to locate files before using read. Sorted by modification time (newest first).
-- "content": show the matching lines themselves. Supports `-A`/`-B`/`-C` for context lines, `-n` for line numbers (default on), and `head_limit` to cap output.
+- "content" (DEFAULT): show the matching lines themselves. Supports `-A`/`-B`/`-C` for context lines, `-n` for line numbers (default on), and `head_limit` to cap output.
+- "files_with_matches": one path per file that matches — cheapest, best when you just want to locate files before using read. Sorted by modification time (newest first).
 - "count": one count-path per file, sorted by mtime. Use when you need to quantify match density per file.
 
 Flags (Claude-style, mirror ripgrep):

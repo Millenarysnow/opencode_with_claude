@@ -85,7 +85,7 @@ export const GrepTool = Tool.define(
       parameters: Parameters,
       execute: (params: Params, ctx: Tool.Context) =>
         Effect.gen(function* () {
-          const mode = params.output_mode ?? "files_with_matches"
+          const mode = params.output_mode ?? "content"
           const empty = {
             title: params.pattern,
             metadata: { matches: 0, truncated: false, mode },

@@ -13,14 +13,14 @@
 | Phase | 描述 | 状态 |
 |---|---|---|
 | 0 | 对比基线 | ✅ 完成 |
-| 1 | 工具 prompt 大重构 (14 个) | 🚧 进行中 |
-| 2 | 系统 prompt 增强 (+ copilot 路由修复) | ⏸ 待开始 |
-| 3 | Agent 体系 (新增 verify) | ⏸ 待开始 |
-| 4 | Skills 库 (移植 4 个) | ⏸ 待开始 |
-| 5 | 工具细节精化 | ⏸ 待开始 |
-| 6 | TodoWrite activeForm | ⏸ 待开始 |
-| 7 | 可选增强 | ⏸ 待开始 |
-| 8 | 端到端验证 | ⏸ 待开始 |
+| 1 | 工具 prompt 大重构 (14 个) | ✅ 完成 (6 commits) |
+| 2 | 系统 prompt 增强 (+ copilot 路由修复) | ✅ 完成 (2 commits) |
+| 3 | Agent 体系 (新增 verify) | ✅ 完成 (1 commit) |
+| 4 | Skills 库 (移植 5 个) | ✅ 完成 (1 commit) |
+| 5 | 工具细节精化 (grep/edit/read/shell/todo) | ✅ 完成 (5 commits) |
+| 6 | TodoWrite activeForm | ✅ 完成 (1 commit) |
+| 7 | 可选增强 (OutputStyles 等) | ⏭️ 跳过 — 现有 Skill 机制已覆盖 |
+| 8 | 端到端验证 | 🚧 进行中 |
 
 ## 开发约定
 
