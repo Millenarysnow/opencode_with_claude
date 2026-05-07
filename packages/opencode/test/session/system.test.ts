@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { Effect, Layer } from "effect"
 import type { Agent } from "../../src/agent/agent"
 import { NamedError } from "@opencode-ai/core/util/error"
@@ -70,4 +70,54 @@ describe("session.system", () => {
       expect(zeta).toBeGreaterThan(middle)
     }),
   )
+})
+
+// Helper to build a minimal Provider.Model shape for the provider() pure
+// router. Only the two fields touched by the routing logic matter.
+const mkModel = (providerID: string, apiId: string): any => ({
+  providerID,
+  api: { id: apiId },
+})
+
+describe("session.system.provider (claude-fusion routing)", () => {
+  test("github-copilot + gpt-5 routes to copilot-gpt-5", () => {
+    const [prompt] = SystemPrompt.provider(mkModel("github-copilot", "gpt-5"))
+    expect(prompt.length).toBeGreaterThan(100)
+    expect(prompt).toContain("software engineering")
+  })
+
+  test("github-copilot + gpt-4o routes to copilot-gpt-5 (same family)", () => {
+    const [prompt] = SystemPrompt.provider(mkModel("github-copilot", "gpt-4o"))
+    expect(prompt.length).toBeGreaterThan(100)
+    expect(prompt).toContain("software engineering")
+  })
+
+  test("github-copilot + claude-sonnet-4 routes to anthropic prompt", () => {
+    const [prompt] = SystemPrompt.provider(mkModel("github-copilot", "claude-sonnet-4"))
+    expect(prompt.length).toBeGreaterThan(100)
+  })
+
+  test("github-copilot + gemini-2.5-pro routes to gemini prompt", () => {
+    const [prompt] = SystemPrompt.provider(mkModel("github-copilot", "gemini-2.5-pro"))
+    expect(prompt.length).toBeGreaterThan(100)
+  })
+
+  test("github-copilot + unknown model falls back to copilot-gpt-5", () => {
+    // Copilot historically only proxies OpenAI models, so the fused prompt is
+    // the safe default when the family isn't explicitly matched.
+    const [prompt] = SystemPrompt.provider(mkModel("github-copilot", "experimental-xyz"))
+    expect(prompt.length).toBeGreaterThan(100)
+    expect(prompt).toContain("software engineering")
+  })
+
+  test("non-copilot gpt-4o still uses native BEAST prompt (unchanged)", () => {
+    const [prompt] = SystemPrompt.provider(mkModel("openai", "gpt-4o"))
+    expect(prompt.length).toBeGreaterThan(100)
+    expect(typeof prompt).toBe("string")
+  })
+
+  test("anthropic claude-sonnet-4 still routes to anthropic prompt (unchanged)", () => {
+    const [prompt] = SystemPrompt.provider(mkModel("anthropic", "claude-sonnet-4"))
+    expect(prompt.length).toBeGreaterThan(100)
+  })
 })

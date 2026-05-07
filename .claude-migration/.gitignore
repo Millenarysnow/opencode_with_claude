@@ -7,5 +7,8 @@ run-*.ps1
 .tests-all.log
 .grep-baseline.log
 .grep-post-fix.log
+.skill-test.log
+.system-test.log
 .commit-msg.tmp
 grep-original.ts
+system-test-original.ts
