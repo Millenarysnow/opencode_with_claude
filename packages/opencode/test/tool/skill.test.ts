@@ -94,3 +94,36 @@ Use this skill.
     ),
   )
 })
+
+describe("tool.skill bundled (claude-fusion)", () => {
+  it.live("bundled skills are registered and retrievable by name", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const registry = yield* ToolRegistry.Service
+          const agent = { name: "build", mode: "primary" as const, permission: [], options: {} }
+          const tool = (yield* registry.tools({
+            providerID: "opencode" as any,
+            modelID: "gpt-5" as any,
+            agent,
+          })).find((tool) => tool.id === SkillTool.id)
+          if (!tool) throw new Error("Skill tool not found")
+
+          const ctx: Tool.Context = {
+            ...baseCtx,
+            ask: () => Effect.void,
+          }
+
+          // 5 bundled skills registered by registerBundled() in skill/index.ts:
+          //   simplify, verify, commit, debug, skillify
+          // Execute each and confirm the output includes the skill content.
+          for (const name of ["simplify", "verify", "commit", "debug", "skillify"]) {
+            const result = yield* tool.execute({ name }, ctx)
+            expect(result.output).toContain(`<skill_content name="${name}">`)
+            expect(result.metadata.dir).toBeDefined()
+          }
+        }),
+      { git: true },
+    ),
+  )
+})

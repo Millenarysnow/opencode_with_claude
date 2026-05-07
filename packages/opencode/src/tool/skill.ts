@@ -36,8 +36,31 @@ export const SkillTool = Tool.define(
             metadata: {},
           })
 
-          const dir = path.dirname(info.location)
-          const base = pathToFileURL(dir).href
+          // Claude-fusion: bundled skills are virtual — they don't live on disk,
+          // so skip the ripgrep file listing and emit a minimal output block.
+          const isBundled = info.location.startsWith("opencode-bundled://")
+          const dir = isBundled ? info.location : path.dirname(info.location)
+          const base = isBundled ? info.location : pathToFileURL(dir).href
+
+          if (isBundled) {
+            return {
+              title: `Loaded skill: ${info.name}`,
+              output: [
+                `<skill_content name="${info.name}">`,
+                `# Skill: ${info.name}`,
+                "",
+                info.content.trim(),
+                "",
+                `This is a bundled opencode skill (no on-disk scripts/reference).`,
+                "</skill_content>",
+              ].join("\n"),
+              metadata: {
+                name: info.name,
+                dir,
+              },
+            }
+          }
+
           const limit = 10
           const files = yield* rg.files({ cwd: dir, follow: false, hidden: true, signal: ctx.abort }).pipe(
             Stream.filter((file) => !file.includes("SKILL.md")),
