@@ -10,15 +10,69 @@ import * as Tool from "./tool"
 
 const MAX_LINE_LENGTH = 2000
 
+/**
+ * Output mode mirroring Claude's GrepTool:
+ *   - "content": lines with matches (optionally with -A/-B/-C context)
+ *   - "files_with_matches": one path per file that has any match (default)
+ *   - "count": one path with match count per file
+ */
 export const Parameters = Schema.Struct({
   pattern: Schema.String.annotate({ description: "The regex pattern to search for in file contents" }),
   path: Schema.optional(Schema.String).annotate({
-    description: "The directory to search in. Defaults to the current working directory.",
+    description: "File or directory to search in (rg PATH). Defaults to current working directory.",
   }),
   include: Schema.optional(Schema.String).annotate({
-    description: 'File pattern to include in the search (e.g. "*.js", "*.{ts,tsx}")',
+    description: 'Glob pattern filter (e.g. "*.js", "*.{ts,tsx}") — matches file paths before searching.',
+  }),
+  type: Schema.optional(Schema.String).annotate({
+    description:
+      'File type filter by language (rg --type), e.g. "js", "py", "rust", "go". More efficient than glob for standard types.',
+  }),
+  output_mode: Schema.optional(
+    Schema.Union([Schema.Literal("content"), Schema.Literal("files_with_matches"), Schema.Literal("count")]),
+  ).annotate({
+    description:
+      'Output mode: "content" shows matching lines (with -A/-B/-C). "files_with_matches" shows only file paths (default). "count" shows match counts.',
+  }),
+  "-i": Schema.optional(Schema.Boolean).annotate({
+    description: "Case insensitive search (rg -i).",
+  }),
+  "-n": Schema.optional(Schema.Boolean).annotate({
+    description: 'Show line numbers (rg -n). Requires output_mode: "content". Default on.',
+  }),
+  "-A": Schema.optional(Schema.Number).annotate({
+    description: 'Lines of context AFTER each match (rg -A). Requires output_mode: "content".',
+  }),
+  "-B": Schema.optional(Schema.Number).annotate({
+    description: 'Lines of context BEFORE each match (rg -B). Requires output_mode: "content".',
+  }),
+  "-C": Schema.optional(Schema.Number).annotate({
+    description: 'Lines of context around each match (rg -C). Requires output_mode: "content".',
+  }),
+  multiline: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "Enable multiline mode: patterns can span lines, `.` matches newlines (rg -U --multiline-dotall). Use for matching struct/function bodies.",
+  }),
+  head_limit: Schema.optional(Schema.Number).annotate({
+    description:
+      "Limit output to first N results (files_with_matches/count: files; content: lines). Matches are pre-sorted by mtime desc.",
   }),
 })
+
+interface Params {
+  pattern: string
+  path?: string
+  include?: string
+  type?: string
+  output_mode?: "content" | "files_with_matches" | "count"
+  "-i"?: boolean
+  "-n"?: boolean
+  "-A"?: number
+  "-B"?: number
+  "-C"?: number
+  multiline?: boolean
+  head_limit?: number
+}
 
 export const GrepTool = Tool.define(
   "grep",
@@ -29,11 +83,12 @@ export const GrepTool = Tool.define(
     return {
       description: DESCRIPTION,
       parameters: Parameters,
-      execute: (params: { pattern: string; path?: string; include?: string }, ctx: Tool.Context) =>
+      execute: (params: Params, ctx: Tool.Context) =>
         Effect.gen(function* () {
+          const mode = params.output_mode ?? "files_with_matches"
           const empty = {
             title: params.pattern,
-            metadata: { matches: 0, truncated: false },
+            metadata: { matches: 0, truncated: false, mode },
             output: "No files found",
           }
           if (!params.pattern) {
@@ -48,6 +103,8 @@ export const GrepTool = Tool.define(
               pattern: params.pattern,
               path: params.path,
               include: params.include,
+              type: params.type,
+              output_mode: mode,
             },
           })
 
@@ -64,11 +121,29 @@ export const GrepTool = Tool.define(
             kind: info?.type === "Directory" ? "directory" : "file",
           })
 
+          // Resolve context lines: -C overrides both -A and -B if set.
+          let contextBefore = params["-B"]
+          let contextAfter = params["-A"]
+          if (params["-C"] !== undefined) {
+            contextBefore = params["-C"]
+            contextAfter = params["-C"]
+          }
+          // Context only meaningful in content mode.
+          if (mode !== "content") {
+            contextBefore = undefined
+            contextAfter = undefined
+          }
+
           const result = yield* rg.search({
             cwd,
             pattern: params.pattern,
             glob: params.include ? [params.include] : undefined,
+            type: params.type,
             file,
+            caseInsensitive: params["-i"],
+            multiline: params.multiline,
+            contextBefore,
+            contextAfter,
             signal: ctx.abort,
           })
           if (result.items.length === 0) return empty
@@ -103,15 +178,167 @@ export const GrepTool = Tool.define(
             return [{ ...row, mtime }]
           })
 
-          matches.sort((a, b) => b.mtime - a.mtime)
+          // Sort matches: newest file first, then by line number within file.
+          matches.sort((a, b) => (b.mtime - a.mtime) || (a.line - b.line))
 
-          const limit = 100
+          // ---- files_with_matches mode ----
+          if (mode === "files_with_matches") {
+            const seen = new Set<string>()
+            const files: string[] = []
+            for (const m of matches) {
+              if (seen.has(m.path)) continue
+              seen.add(m.path)
+              files.push(m.path)
+            }
+            const limit = params.head_limit ?? 100
+            const truncated = files.length > limit
+            const final = truncated ? files.slice(0, limit) : files
+            const total = files.length
+            const output: string[] = [
+              `Found ${total} file${total === 1 ? "" : "s"}${truncated ? ` (showing first ${limit})` : ""}`,
+              ...final,
+            ]
+            if (truncated) {
+              output.push("")
+              output.push(
+                `(Results truncated: showing ${limit} of ${total} files. Use head_limit or refine pattern/include.)`,
+              )
+            }
+            if (result.partial) {
+              output.push("")
+              output.push("(Some paths were inaccessible and skipped)")
+            }
+            return {
+              title: params.pattern,
+              metadata: { matches: matches.length, files: total, truncated, mode },
+              output: output.join("\n"),
+            }
+          }
+
+          // ---- count mode ----
+          if (mode === "count") {
+            const counts = new Map<string, number>()
+            for (const m of matches) counts.set(m.path, (counts.get(m.path) ?? 0) + 1)
+            const entries = [...counts.entries()]
+            // Preserve mtime-desc ordering from matches
+            const order = new Map<string, number>()
+            let idx = 0
+            for (const m of matches) if (!order.has(m.path)) order.set(m.path, idx++)
+            entries.sort((a, b) => (order.get(a[0]) ?? 0) - (order.get(b[0]) ?? 0))
+
+            const limit = params.head_limit ?? 100
+            const truncated = entries.length > limit
+            const final = truncated ? entries.slice(0, limit) : entries
+            const totalFiles = entries.length
+            const totalMatches = matches.length
+            const output: string[] = [
+              `Found ${totalMatches} match${totalMatches === 1 ? "" : "es"} across ${totalFiles} file${totalFiles === 1 ? "" : "s"}${truncated ? ` (showing first ${limit})` : ""}`,
+              ...final.map(([file, count]) => `${count}\t${file}`),
+            ]
+            if (truncated) {
+              output.push("")
+              output.push(`(Results truncated: showing ${limit} of ${totalFiles} files.)`)
+            }
+            if (result.partial) {
+              output.push("")
+              output.push("(Some paths were inaccessible and skipped)")
+            }
+            return {
+              title: params.pattern,
+              metadata: { matches: totalMatches, files: totalFiles, truncated, mode },
+              output: output.join("\n"),
+            }
+          }
+
+          // ---- content mode ----
+          // When context is requested, rely on entries (match+context order preserved).
+          const showLineNumbers = params["-n"] !== false
+          const wantContext =
+            (contextBefore !== undefined && contextBefore > 0) ||
+            (contextAfter !== undefined && contextAfter > 0)
+
+          const limit = params.head_limit ?? 100
+
+          if (wantContext && result.entries && result.entries.length > 0) {
+            // Build per-file list from entries preserving original order.
+            // Group consecutive entries by path. rg emits match+context interleaved.
+            interface Row {
+              path: string
+              line: number
+              text: string
+              kind: "match" | "context"
+            }
+            const all: Row[] = result.entries.map((e) => ({
+              path: AppFileSystem.resolve(
+                path.isAbsolute(e.data.path.text) ? e.data.path.text : path.join(cwd, e.data.path.text),
+              ),
+              line: e.data.line_number,
+              text: e.data.lines.text,
+              kind: e.kind,
+            }))
+            // Sort files by mtime desc (stable within file preserves rg ordering).
+            const fileOrder = new Map<string, number>()
+            for (const m of matches) if (!fileOrder.has(m.path)) fileOrder.set(m.path, fileOrder.size)
+            const byFile = new Map<string, Row[]>()
+            for (const r of all) {
+              const arr = byFile.get(r.path) ?? []
+              arr.push(r)
+              byFile.set(r.path, arr)
+            }
+            const filesSorted = [...byFile.keys()].sort(
+              (a, b) => (fileOrder.get(a) ?? Infinity) - (fileOrder.get(b) ?? Infinity),
+            )
+            const output: string[] = []
+            let emitted = 0
+            let truncated = false
+            outer: for (const file of filesSorted) {
+              if (output.length > 0) output.push("")
+              output.push(`${file}:`)
+              const rows = byFile.get(file) ?? []
+              let lastLine = -1
+              for (const r of rows) {
+                if (emitted >= limit) {
+                  truncated = true
+                  break outer
+                }
+                // Insert separator between non-contiguous blocks.
+                if (lastLine !== -1 && r.line > lastLine + 1) output.push("--")
+                const sep = r.kind === "match" ? ":" : "-"
+                const text =
+                  r.text.length > MAX_LINE_LENGTH ? r.text.substring(0, MAX_LINE_LENGTH) + "..." : r.text
+                const trimmed = text.replace(/\r?\n$/, "")
+                if (showLineNumbers) output.push(`  ${r.line}${sep}${trimmed}`)
+                else output.push(`  ${trimmed}`)
+                lastLine = r.line
+                emitted++
+              }
+            }
+            const totalMatches = matches.length
+            output.unshift(
+              `Found ${totalMatches} match${totalMatches === 1 ? "" : "es"}${truncated ? ` (truncated at ${limit} lines)` : ""}`,
+            )
+            if (truncated) {
+              output.push("")
+              output.push(`(Output truncated at ${limit} lines. Use head_limit or narrow the search.)`)
+            }
+            if (result.partial) {
+              output.push("")
+              output.push("(Some paths were inaccessible and skipped)")
+            }
+            return {
+              title: params.pattern,
+              metadata: { matches: totalMatches, truncated, mode },
+              output: output.join("\n"),
+            }
+          }
+
+          // content mode without context (original behaviour).
           const truncated = matches.length > limit
           const final = truncated ? matches.slice(0, limit) : matches
           if (final.length === 0) return empty
 
           const total = matches.length
-          const output = [`Found ${total} matches${truncated ? ` (showing first ${limit})` : ""}`]
+          const output = [`Found ${total} match${total === 1 ? "" : "es"}${truncated ? ` (showing first ${limit})` : ""}`]
 
           let current = ""
           for (const match of final) {
@@ -122,7 +349,9 @@ export const GrepTool = Tool.define(
             }
             const text =
               match.text.length > MAX_LINE_LENGTH ? match.text.substring(0, MAX_LINE_LENGTH) + "..." : match.text
-            output.push(`  Line ${match.line}: ${text}`)
+            const trimmed = text.replace(/\r?\n$/, "")
+            if (showLineNumbers) output.push(`  Line ${match.line}: ${trimmed}`)
+            else output.push(`  ${trimmed}`)
           }
 
           if (truncated) {
@@ -142,6 +371,7 @@ export const GrepTool = Tool.define(
             metadata: {
               matches: total,
               truncated,
+              mode,
             },
             output: output.join("\n"),
           }

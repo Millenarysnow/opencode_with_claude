@@ -93,7 +93,22 @@ const Summary = Schema.Struct({
   }),
 })
 
-const Result = Schema.Union([Begin, Match, End, Summary])
+export const ContextLineMatch = Schema.Struct({
+  path: PathText,
+  lines: Schema.Struct({
+    text: Schema.String,
+  }),
+  line_number: NonNegativeInt,
+  absolute_offset: NonNegativeInt,
+  submatches: Schema.Array(Schema.Unknown),
+}).pipe(withStatics((s) => ({ zod: zod(s) })))
+
+export const ContextLine = Schema.Struct({
+  type: Schema.Literal("context"),
+  data: ContextLineMatch,
+})
+
+const Result = Schema.Union([Begin, Match, ContextLine, End, Summary])
 const decodeResult = Schema.decodeUnknownEffect(Schema.fromJsonString(Result))
 
 export type Result = Schema.Schema.Type<typeof Result>
@@ -103,9 +118,18 @@ export type Begin = Schema.Schema.Type<typeof Begin>
 export type End = Schema.Schema.Type<typeof End>
 export type Summary = Schema.Schema.Type<typeof Summary>
 export type Row = Match["data"]
+export type ContextLine = Schema.Schema.Type<typeof ContextLine>
+export type ContextRow = ContextLine["data"]
+
+export type SearchItem =
+  | { kind: "match"; data: Row }
+  | { kind: "context"; data: ContextRow }
 
 export interface SearchResult {
   items: Item[]
+  /** Full result stream including context lines, when -A/-B/-C were requested.
+   *  Always a superset of `items`. Each entry is tagged with its kind. */
+  entries?: SearchItem[]
   partial: boolean
 }
 
@@ -122,9 +146,20 @@ export interface SearchInput {
   cwd: string
   pattern: string
   glob?: string[]
+  /** rg --type <TYPE> (e.g. "js", "py", "rust"). More efficient than include for standard file types. */
+  type?: string
+  /** rg --max-count — stop after N matches per file. */
   limit?: number
   follow?: boolean
   file?: string[]
+  /** rg -i — case-insensitive match. */
+  caseInsensitive?: boolean
+  /** rg -U --multiline-dotall — patterns can span lines, `.` matches newlines. */
+  multiline?: boolean
+  /** rg -B<N> — show N lines before each match (content mode only). */
+  contextBefore?: number
+  /** rg -A<N> — show N lines after each match (content mode only). */
+  contextAfter?: number
   signal?: AbortSignal
 }
 
@@ -210,6 +245,11 @@ function filesArgs(input: FilesInput) {
 function searchArgs(input: SearchInput) {
   const args = ["--no-config", "--json", "--hidden", "--glob=!.git/*", "--no-messages"]
   if (input.follow) args.push("--follow")
+  if (input.caseInsensitive) args.push("-i")
+  if (input.multiline) args.push("-U", "--multiline-dotall")
+  if (input.type) args.push(`--type=${input.type}`)
+  if (input.contextBefore !== undefined && input.contextBefore > 0) args.push(`-B${input.contextBefore}`)
+  if (input.contextAfter !== undefined && input.contextAfter > 0) args.push(`-A${input.contextAfter}`)
   if (input.glob) {
     for (const glob of input.glob) args.push(`--glob=${glob}`)
   }
@@ -383,14 +423,20 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
           Effect.gen(function* () {
             const handle = yield* spawner.spawn(yield* command(input.cwd, searchArgs(input)))
 
-            const [items, stderr, code] = yield* Effect.all(
+            const [entries, stderr, code] = yield* Effect.all(
               [
                 Stream.decodeText(handle.stdout).pipe(
                   Stream.splitLines,
                   Stream.filter((line) => line.length > 0),
                   Stream.mapEffect(parse),
-                  Stream.filter((item): item is Match => item.type === "match"),
-                  Stream.map((item) => row(item.data)),
+                  Stream.filter(
+                    (item): item is Match | ContextLine => item.type === "match" || item.type === "context",
+                  ),
+                  Stream.map((item): SearchItem =>
+                    item.type === "match"
+                      ? { kind: "match", data: row(item.data) }
+                      : { kind: "context", data: { ...item.data, path: { ...item.data.path, text: clean(item.data.path.text) } } },
+                  ),
                   Stream.runCollect,
                   Effect.map((chunk) => [...chunk]),
                 ),
@@ -404,8 +450,10 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
               return yield* Effect.fail(error(stderr, code))
             }
 
+            const items: Item[] = code === 1 ? [] : entries.filter((e) => e.kind === "match").map((e) => e.data as Row)
             return {
-              items: code === 1 ? [] : items,
+              items,
+              entries: code === 1 ? [] : entries,
               partial: code === 2,
             }
           }),

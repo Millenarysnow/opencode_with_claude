@@ -1,0 +1,5 @@
+# local build/patch scripts, logs, tmp files — not commit artefacts
+_*.mjs
+run-typecheck.ps1
+.typecheck.log
+.commit-msg.tmp

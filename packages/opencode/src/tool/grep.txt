@@ -2,10 +2,29 @@ A powerful content search tool built on ripgrep.
 
 Usage:
 - ALWAYS use grep for search tasks. NEVER invoke `grep` or `rg` as a shell command. The grep tool has been optimized for correct permissions and ripgrep handling.
-- Supports full regex syntax (e.g., "log.*Error", "function\s+\w+")
-- Filter files with the include parameter (e.g., "*.js", "*.{ts,tsx}")
-- Returns file paths and line numbers with at least one match, sorted by modification time
-- Pattern syntax: uses ripgrep (not GNU grep) — literal braces need escaping (use `interface\{\}` to find `interface{}` in Go code)
+- Supports full regex syntax (e.g., "log.*Error", "function\s+\w+").
+- Filter files with the `include` parameter (glob, e.g. "*.js", "*.{ts,tsx}") or with `type` (language, e.g. "js", "py", "rust"). `type` is more efficient than glob for standard types.
+- Pattern syntax: uses ripgrep (not GNU grep) — literal braces need escaping (use `interface\{\}` to find `interface{}` in Go code).
 - When you are doing an open-ended search that may require multiple rounds of globbing and grepping, use the task tool instead — it keeps the intermediate tool output out of your context.
-- If you need to identify/count the number of matches within files, use the shell tool with `rg` (ripgrep) directly only when the grep tool cannot express what you need. Prefer grep.
 - You have the capability to call multiple tools in a single response. Speculatively perform multiple independent searches as a batch when it can narrow the question faster.
+
+Output modes (parameter `output_mode`):
+- "files_with_matches" (DEFAULT): one path per file that matches — cheapest, best when you just want to locate files before using read. Sorted by modification time (newest first).
+- "content": show the matching lines themselves. Supports `-A`/`-B`/`-C` for context lines, `-n` for line numbers (default on), and `head_limit` to cap output.
+- "count": one count-path per file, sorted by mtime. Use when you need to quantify match density per file.
+
+Flags (Claude-style, mirror ripgrep):
+- `-i` — case-insensitive match.
+- `-n` — show line numbers (content mode only). Default on; pass `false` to suppress.
+- `-A <N>` — show N lines AFTER each match (content mode only).
+- `-B <N>` — show N lines BEFORE each match (content mode only).
+- `-C <N>` — show N lines around each match (content mode only). Equivalent to setting both -A and -B to N.
+- `multiline` — pattern can span lines, `.` matches newlines. Use when matching struct/function/block bodies across newlines.
+- `head_limit` — cap output: files_with_matches/count limits file count; content limits emitted lines. Matches are pre-sorted by mtime desc.
+
+Examples:
+- Locate files defining a symbol: `{"pattern":"\\bfoo\\s*=","output_mode":"files_with_matches"}`.
+- Read match with context: `{"pattern":"throw new","output_mode":"content","-C":2,"type":"ts"}`.
+- Case-insensitive TODO scan: `{"pattern":"todo|fixme","-i":true,"output_mode":"count","include":"src/**"}`.
+- Match a Go interface across lines: `{"pattern":"interface\\s*\\{[^}]*Write\\b","multiline":true,"type":"go"}`.
+- If you need counts/searches the tool cannot express, use the shell tool with `rg` directly only as a last resort.
