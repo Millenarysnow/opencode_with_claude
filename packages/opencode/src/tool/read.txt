@@ -16,3 +16,8 @@ Usage:
 - Call this tool in parallel when you know there are multiple files you want to read — it is always better to batch independent reads into a single response.
 - Avoid tiny repeated slices (e.g. 30-line chunks). If you need more context, read a larger window.
 - If you are unsure of the correct file path, use the glob tool to look up filenames by glob pattern, or the grep tool to find specific content in large files.
+- When a file is not found, the error message will suggest candidate paths in the parent directory — particularly files that share the same base name but a different extension (e.g. asked for `foo.ts`, got `foo.tsx`). Use those hints rather than guessing further.
+
+Refused paths:
+- UNC / network paths (e.g. `\\server\share\...` on Windows, or `//server/share/...`) are rejected without any I/O — resolving them via SMB could leak credentials to a remote host. Use a local path only.
+- Blocking/infinite device files are rejected: `/dev/zero`, `/dev/random`, `/dev/urandom`, `/dev/full`, `/dev/stdin`, `/dev/tty`, `/dev/console`, `/dev/stdout`, `/dev/stderr`, `/dev/fd/{0,1,2}`, and their `/proc/{self,<pid>}/fd/{0,1,2}` aliases. `/dev/null` is fine.

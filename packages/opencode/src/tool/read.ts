@@ -20,6 +20,54 @@ const MAX_BYTES_LABEL = `${MAX_BYTES / 1024} KB`
 const SAMPLE_BYTES = 4096
 const SUPPORTED_IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
 
+// ---- Claude-fusion: path guards (no I/O) ----
+
+/**
+ * UNC paths (\\server\share\...) trigger Windows SMB auth that can leak
+ * NTLM credential hashes to remote hosts. Reject before any filesystem op.
+ * We check both Windows (\\) and POSIX-style (//) prefixes; some tools
+ * normalise UNC into // form.
+ */
+function isUncPath(filepath: string): boolean {
+  return filepath.startsWith("\\\\") || filepath.startsWith("//")
+}
+
+/**
+ * Devices/virtual files that either never EOF (infinite output) or block
+ * waiting for input. Reading them would hang the tool. Path-based check —
+ * /dev/null remains allowed because it harmlessly reads empty.
+ */
+const BLOCKED_DEVICE_PATHS = new Set<string>([
+  // infinite output — never reaches EOF
+  "/dev/zero",
+  "/dev/random",
+  "/dev/urandom",
+  "/dev/full",
+  // blocks waiting for input
+  "/dev/stdin",
+  "/dev/tty",
+  "/dev/console",
+  // writing targets; nonsensical to read
+  "/dev/stdout",
+  "/dev/stderr",
+  // fd aliases for stdio
+  "/dev/fd/0",
+  "/dev/fd/1",
+  "/dev/fd/2",
+])
+
+function isBlockedDevicePath(filepath: string): boolean {
+  // Normalise to forward slashes so Windows-style paths can't sneak past.
+  const p = filepath.replace(/\\/g, "/")
+  if (BLOCKED_DEVICE_PATHS.has(p)) return true
+  // /proc/self/fd/{0,1,2} and /proc/<pid>/fd/{0,1,2} are Linux stdio aliases.
+  if (p.startsWith("/proc/") && (p.endsWith("/fd/0") || p.endsWith("/fd/1") || p.endsWith("/fd/2"))) {
+    return true
+  }
+  return false
+}
+
+
 // `offset` and `limit` were originally `z.coerce.number()` — the runtime
 // coercion was useful when the tool was called from a shell but serves no
 // purpose in the LLM tool-call path (the model emits typed JSON). The JSON
@@ -46,22 +94,48 @@ export const ReadTool = Tool.define(
     const miss = Effect.fn("ReadTool.miss")(function* (filepath: string) {
       const dir = path.dirname(filepath)
       const base = path.basename(filepath)
-      const items = yield* fs.readDirectory(dir).pipe(
-        Effect.map((items) =>
-          items
-            .filter(
-              (item) =>
-                item.toLowerCase().includes(base.toLowerCase()) || base.toLowerCase().includes(item.toLowerCase()),
-            )
-            .map((item) => path.join(dir, item))
-            .slice(0, 3),
-        ),
+      const ext = path.extname(base)
+      const stem = ext ? base.slice(0, -ext.length) : base
+      const baseLC = base.toLowerCase()
+      const stemLC = stem.toLowerCase()
+
+      const dirItems = yield* fs.readDirectory(dir).pipe(
         Effect.catch(() => Effect.succeed([] as string[])),
       )
 
-      if (items.length > 0) {
+      // Two complementary signals:
+      //   1. fuzzy: substring overlap with the requested basename (existing logic)
+      //   2. sibling: same stem but different extension (Claude's findSimilarFile)
+      const fuzzy: string[] = []
+      const siblings: string[] = []
+      for (const item of dirItems) {
+        if (item === base) continue
+        const itemLC = item.toLowerCase()
+        const itemStem = path.basename(item, path.extname(item)).toLowerCase()
+        if (stemLC && itemStem === stemLC) {
+          siblings.push(item)
+          continue
+        }
+        if (itemLC.includes(baseLC) || baseLC.includes(itemLC)) {
+          fuzzy.push(item)
+        }
+      }
+
+      // Siblings are the strongest hint (same name, wrong extension) so surface
+      // them first. Deduplicate while preserving order.
+      const ordered: string[] = []
+      const seen = new Set<string>()
+      for (const item of [...siblings, ...fuzzy]) {
+        if (seen.has(item)) continue
+        seen.add(item)
+        ordered.push(item)
+        if (ordered.length >= 3) break
+      }
+
+      if (ordered.length > 0) {
+        const joined = ordered.map((item) => path.join(dir, item)).join("\n")
         return yield* Effect.fail(
-          new Error(`File not found: ${filepath}\n\nDid you mean one of these?\n${items.join("\n")}`),
+          new Error(`File not found: ${filepath}\n\nDid you mean one of these?\n${joined}`),
         )
       }
 
@@ -159,8 +233,36 @@ export const ReadTool = Tool.define(
       if (!path.isAbsolute(filepath)) {
         filepath = path.resolve(instance.directory, filepath)
       }
+
+      // Claude-fusion: UNC/device guards MUST run before normalizePath.
+      // normalizePath calls realpathSync.native() which, for a UNC path,
+      // itself triggers SMB authentication and can leak NTLM credentials
+      // to a remote host. Same for /dev/zero etc — stat()/realpath would
+      // hang. Both checks are pure string work: no I/O.
+      if (isUncPath(filepath)) {
+        return yield* Effect.fail(
+          new Error(
+            `Cannot read UNC/network path: ${filepath}. Reading this path would trigger Windows network authentication and could leak credentials. Use a local path instead.`,
+          ),
+        )
+      }
+      if (isBlockedDevicePath(filepath)) {
+        return yield* Effect.fail(
+          new Error(`Cannot read device file: ${filepath}. This device would block or produce infinite output.`),
+        )
+      }
+
       if (process.platform === "win32") {
         filepath = AppFileSystem.normalizePath(filepath)
+        // Re-check after normalisation in case the input was a disguised
+        // form (e.g. //server/share → \\server\share).
+        if (isUncPath(filepath)) {
+          return yield* Effect.fail(
+            new Error(
+              `Cannot read UNC/network path: ${filepath}. Reading this path would trigger Windows network authentication and could leak credentials. Use a local path instead.`,
+            ),
+          )
+        }
       }
       const title = path.relative(instance.worktree, filepath)
 

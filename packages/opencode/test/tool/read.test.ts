@@ -499,3 +499,55 @@ describe("tool.read binary detection", () => {
     }),
   )
 })
+
+describe("tool.read path guards (claude-fusion)", () => {
+  it.live("rejects UNC paths without filesystem access", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      // Windows-style UNC. On non-Windows it's still rejected by string check.
+      const uncPath = "\\\\malicious-server\\share\\secret.txt"
+      const err = yield* fail(dir, { filePath: uncPath })
+      expect(err.message).toContain("UNC/network path")
+      expect(err.message).toContain("credentials")
+    }),
+  )
+
+  it.live("rejects POSIX-style //server/share UNC variant", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      const err = yield* fail(dir, { filePath: "//attacker.example/x/y.txt" })
+      expect(err.message).toContain("UNC/network path")
+    }),
+  )
+
+  it.live("rejects /dev/zero (would produce infinite output)", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      const err = yield* fail(dir, { filePath: "/dev/zero" })
+      expect(err.message).toContain("device file")
+      expect(err.message).toContain("block or produce infinite")
+    }),
+  )
+
+  it.live("rejects /dev/tty (would block on stdin)", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      const err = yield* fail(dir, { filePath: "/dev/tty" })
+      expect(err.message).toContain("device file")
+    }),
+  )
+
+  it.live("suggests siblings with same stem but different extension", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      yield* put(path.join(dir, "component.tsx"), "export const C = () => null\n")
+      yield* put(path.join(dir, "component.css"), ".c {}\n")
+
+      const err = yield* fail(dir, { filePath: path.join(dir, "component.ts") })
+      expect(err.message).toContain("File not found")
+      expect(err.message).toContain("Did you mean")
+      // Sibling match (same stem, different ext) is the strongest hint.
+      expect(err.message).toContain("component.tsx")
+    }),
+  )
+})
