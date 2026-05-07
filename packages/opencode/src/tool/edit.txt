@@ -10,3 +10,8 @@ Usage:
 - Use the smallest `oldString` that's clearly unique — usually 2-4 adjacent lines is sufficient. Avoid including 10+ lines of context when less already uniquely identifies the target.
 - Use `replaceAll` for replacing and renaming strings across the file. This parameter is useful when you want to rename a variable throughout the file.
 - This tool is the preferred way to modify code. Prefer `edit` over rewriting entire files with `write`.
+
+Quote handling:
+- You do not need to output curly/typographic quotes (' ' " ") in `oldString`. The tool normalizes curly↔straight quotes transparently, so `oldString: 'title: "Foo"'` matches a file containing `title: "Foo"`. Write straight quotes as usual.
+- `newString` is re-quoted to match the file's existing style: if the matched region used curly quotes, the replacement will too (apostrophes in contractions like `it's` are preserved correctly). This keeps typography consistent in markdown, docstrings, and i18n files.
+- Whitespace, indentation, and line endings still have to match — only the quote characters are fuzzy-matched.

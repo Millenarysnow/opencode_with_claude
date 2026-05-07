@@ -2,7 +2,7 @@ import { afterAll, afterEach, describe, test, expect } from "bun:test"
 import path from "path"
 import fs from "fs/promises"
 import { Effect, Layer, ManagedRuntime } from "effect"
-import { EditTool } from "../../src/tool/edit"
+import { EditTool, replace, normalizeQuotes, preserveQuoteStyle } from "../../src/tool/edit"
 import { Instance } from "../../src/project/instance"
 import { WithInstance } from "../../src/project/with-instance"
 import { disposeAllInstances, tmpdir } from "../fixture/fixture"
@@ -750,6 +750,53 @@ describe("tool.edit", () => {
           expect(await fs.readFile(filepath, "utf-8")).toBe("top = 1\nmiddle = keep\nbottom = 2\n")
         },
       })
+    })
+  })
+
+  describe("curly quote normalization", () => {
+    // Unit-test the pure helpers/replacer path (no filesystem required).
+    // These mirror Claude Code's FileEditTool quote handling so Copilot-served
+    // sessions can edit typography-rich docs (markdown with \u201C/\u201D) without
+    // the model having to type curly quotes itself.
+
+    test("normalizeQuotes maps all four curly chars to straight", () => {
+      const input = "\u201Chello \u2018world\u2019\u201D"
+      expect(normalizeQuotes(input)).toBe("\"hello 'world'\"")
+    })
+
+    test("replace() matches straight oldString against curly file content", () => {
+      const content = "title: \u201CGetting Started\u201D\n"
+      const out = replace(content, 'title: "Getting Started"', 'title: "Quickstart"')
+      // File typography is preserved: double curly quotes stay curly.
+      expect(out).toBe("title: \u201CQuickstart\u201D\n")
+    })
+
+    test("replace() preserves curly single quotes", () => {
+      const content = "say \u2018hello\u2019 to them"
+      const out = replace(content, "say 'hello' to them", "say 'goodbye' to them")
+      expect(out).toBe("say \u2018goodbye\u2019 to them")
+    })
+
+    test("replace() handles contraction apostrophes (it\u2019s)", () => {
+      const content = "msg: \u201Cit\u2019s fine\u201D"
+      const out = replace(content, 'msg: "it\'s fine"', 'msg: "it\'s broken"')
+      // Contraction apostrophe remains right-single; outer quotes stay curly.
+      expect(out).toBe("msg: \u201Cit\u2019s broken\u201D")
+    })
+
+    test("replace() leaves plain ASCII edits untouched", () => {
+      const content = 'say "hello" today'
+      const out = replace(content, 'say "hello"', 'say "goodbye"')
+      expect(out).toBe('say "goodbye" today')
+    })
+
+    test("preserveQuoteStyle: no-op when match was exact", () => {
+      expect(preserveQuoteStyle('foo "bar"', 'foo "bar"', 'foo "baz"')).toBe('foo "baz"')
+    })
+
+    test("preserveQuoteStyle: applies double-curly when file uses them", () => {
+      const out = preserveQuoteStyle('foo "bar"', 'foo \u201Cbar\u201D', 'foo "baz"')
+      expect(out).toBe("foo \u201Cbaz\u201D")
     })
   })
 })

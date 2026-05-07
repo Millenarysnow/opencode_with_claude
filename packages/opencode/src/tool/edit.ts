@@ -550,6 +550,132 @@ export const MultiOccurrenceReplacer: Replacer = function* (content, find) {
     startIndex = index + find.length
   }
 }
+// Claude-fusion: curly quote normalization.
+// LLMs almost always output straight quotes (' and "). Files authored by humans
+// frequently contain typographic curly quotes ('' "" ‘ ’ " "). Without
+// normalization, an edit that should succeed fails because the straight-quoted
+// old_string never textually matches the curly-quoted file content.
+//
+// Strategy (mirrors Claude Code's FileEditTool):
+//   1. normalize both file and search string to straight quotes
+//   2. find the match in normalized-file
+//   3. slice the ORIGINAL file at the same offset so the yielded `search` is
+//      the actual text (with curly quotes) — not the straight-quoted version
+//
+// This preserves file typography on the write side (the replacer yields the
+// original substring; caller then replaces it with newString verbatim). The
+// caller is responsible for applying the same curly style to newString when
+// the file already uses curly quotes — see applyCurlyQuoteStyle below.
+const LEFT_SINGLE_CURLY_QUOTE = "\u2018"
+const RIGHT_SINGLE_CURLY_QUOTE = "\u2019"
+const LEFT_DOUBLE_CURLY_QUOTE = "\u201C"
+const RIGHT_DOUBLE_CURLY_QUOTE = "\u201D"
+
+export function normalizeQuotes(str: string): string {
+  return str
+    .replaceAll(LEFT_SINGLE_CURLY_QUOTE, "'")
+    .replaceAll(RIGHT_SINGLE_CURLY_QUOTE, "'")
+    .replaceAll(LEFT_DOUBLE_CURLY_QUOTE, '"')
+    .replaceAll(RIGHT_DOUBLE_CURLY_QUOTE, '"')
+}
+
+function isOpeningQuoteContext(chars: string[], index: number): boolean {
+  if (index === 0) return true
+  const prev = chars[index - 1]
+  return (
+    prev === " " ||
+    prev === "\t" ||
+    prev === "\n" ||
+    prev === "\r" ||
+    prev === "(" ||
+    prev === "[" ||
+    prev === "{" ||
+    prev === "\u2014" || // em dash
+    prev === "\u2013" // en dash
+  )
+}
+
+/**
+ * Convert straight double quotes in a string to curly, using open/close
+ * heuristic: a quote after whitespace/start/opening-bracket is opening,
+ * otherwise closing.
+ */
+export function applyCurlyDoubleQuotes(str: string): string {
+  const chars = [...str]
+  const result: string[] = []
+  for (let i = 0; i < chars.length; i++) {
+    if (chars[i] === '"') {
+      result.push(isOpeningQuoteContext(chars, i) ? LEFT_DOUBLE_CURLY_QUOTE : RIGHT_DOUBLE_CURLY_QUOTE)
+    } else {
+      result.push(chars[i]!)
+    }
+  }
+  return result.join("")
+}
+
+/**
+ * Convert straight single quotes to curly. Apostrophes inside contractions
+ * (letter-apostrophe-letter like "don't", "it's") always become right single
+ * curly quotes — never opening quotes.
+ */
+export function applyCurlySingleQuotes(str: string): string {
+  const chars = [...str]
+  const result: string[] = []
+  for (let i = 0; i < chars.length; i++) {
+    if (chars[i] === "'") {
+      const prev = i > 0 ? chars[i - 1] : undefined
+      const next = i < chars.length - 1 ? chars[i + 1] : undefined
+      const prevIsLetter = prev !== undefined && /\p{L}/u.test(prev)
+      const nextIsLetter = next !== undefined && /\p{L}/u.test(next)
+      if (prevIsLetter && nextIsLetter) {
+        result.push(RIGHT_SINGLE_CURLY_QUOTE)
+      } else {
+        result.push(isOpeningQuoteContext(chars, i) ? LEFT_SINGLE_CURLY_QUOTE : RIGHT_SINGLE_CURLY_QUOTE)
+      }
+    } else {
+      result.push(chars[i]!)
+    }
+  }
+  return result.join("")
+}
+
+/**
+ * If old_string matched via quote normalization (curly quotes in file,
+ * straight quotes from model), apply the same curly style to new_string.
+ * No-op when actualOldString equals oldString (match was already exact).
+ */
+export function preserveQuoteStyle(oldString: string, actualOldString: string, newString: string): string {
+  if (oldString === actualOldString) return newString
+  const hasDouble =
+    actualOldString.includes(LEFT_DOUBLE_CURLY_QUOTE) || actualOldString.includes(RIGHT_DOUBLE_CURLY_QUOTE)
+  const hasSingle =
+    actualOldString.includes(LEFT_SINGLE_CURLY_QUOTE) || actualOldString.includes(RIGHT_SINGLE_CURLY_QUOTE)
+  if (!hasDouble && !hasSingle) return newString
+  let r = newString
+  if (hasDouble) r = applyCurlyDoubleQuotes(r)
+  if (hasSingle) r = applyCurlySingleQuotes(r)
+  return r
+}
+
+/**
+ * Match by normalizing curly → straight quotes on both sides, then yield
+ * the ORIGINAL substring so downstream replacement preserves file typography.
+ * The caller should pass the yielded substring through preserveQuoteStyle
+ * to re-curlify newString when writing.
+ */
+export const CurlyQuoteReplacer: Replacer = function* (content, find) {
+  const normalizedFind = normalizeQuotes(find)
+  if (normalizedFind === find && !/[\u2018\u2019\u201C\u201D]/.test(content)) return
+
+  const normalizedContent = normalizeQuotes(content)
+  const idx = normalizedContent.indexOf(normalizedFind)
+  if (idx === -1) return
+
+  // Assumption holds because normalizeQuotes replaces one-char for one-char —
+  // it never changes byte offsets.
+  yield content.substring(idx, idx + find.length)
+}
+
 
 export const TrimmedBoundaryReplacer: Replacer = function* (content, find) {
   const trimmedFind = find.trim()
@@ -681,6 +807,7 @@ export function replace(content: string, oldString: string, newString: string, r
   for (const replacer of [
     SimpleReplacer,
     LineTrimmedReplacer,
+    CurlyQuoteReplacer,
     BlockAnchorReplacer,
     WhitespaceNormalizedReplacer,
     IndentationFlexibleReplacer,
@@ -693,12 +820,19 @@ export function replace(content: string, oldString: string, newString: string, r
       const index = content.indexOf(search)
       if (index === -1) continue
       notFound = false
+      // Claude-fusion: when the matched substring differs from the
+      // model-supplied oldString only in quote style (curly vs straight),
+      // re-curlify newString to preserve the file's typography.
+      const effectiveNew =
+        search !== oldString && /[\u2018\u2019\u201C\u201D]/.test(search)
+          ? preserveQuoteStyle(oldString, search, newString)
+          : newString
       if (replaceAll) {
-        return content.replaceAll(search, newString)
+        return content.replaceAll(search, effectiveNew)
       }
       const lastIndex = content.lastIndexOf(search)
       if (index !== lastIndex) continue
-      return content.substring(0, index) + newString + content.substring(index + search.length)
+      return content.substring(0, index) + effectiveNew + content.substring(index + search.length)
     }
   }
 
