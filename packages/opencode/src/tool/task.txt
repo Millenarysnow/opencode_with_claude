@@ -1,57 +1,70 @@
-Launch a new agent to handle complex, multistep tasks autonomously.
+Launch a new agent to handle complex, multi-step tasks autonomously.
 
-When using the Task tool, you must specify a subagent_type parameter to select which agent type to use.
+The task tool launches specialized subagents that autonomously handle complex tasks. Each agent type has specific capabilities and tools available to it. When using the task tool, you MUST specify a `subagent_type` parameter to select which agent type to use.
 
-When to use the Task tool:
-- When you are instructed to execute custom slash commands. Use the Task tool with the slash command invocation as the entire prompt. The slash command can take arguments. For example: Task(description="Check the file", prompt="/check-file path/to/file.py")
+Available agent types depend on the current configuration (see the agent list surfaced to you). Common agents:
+- `general`: General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks. Use this when you are searching for a keyword or file and are not confident you will find the right match in the first few tries.
+- `explore`: Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns, search code for keywords, or answer questions about the codebase. When calling, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis.
+- `verify` (if available): Use after a non-trivial implementation to independently verify that builds, tests, and adversarial probes pass. Pass the ORIGINAL task description, files changed, and approach taken.
 
-When NOT to use the Task tool:
-- If you want to read a specific file path, use the Read or Glob tool instead of the Task tool, to find the match more quickly
-- If you are searching for a specific class definition like "class Foo", use the Glob tool instead, to find the match more quickly
-- If you are searching for code within a specific file or set of 2-3 files, use the Read tool instead of the Task tool, to find the match more quickly
-- Other tasks that are not related to the agent descriptions above
+## When to use the task tool
 
+- **Complex research** spanning many files where the intermediate tool output isn't worth keeping in your context
+- **Codebase exploration** that you expect to take more than 2-3 queries
+- **Parallel investigation** of independent questions — launch multiple agents in one message
+- **Slash-command style invocations** when instructed (e.g. `task(subagent_type="general", prompt="/check-file path/to/file.py")`)
 
-Usage notes:
-1. Launch multiple agents concurrently whenever possible, to maximize performance; to do that, use a single message with multiple tool uses
-2. When the agent is done, it will return a single message back to you. The result returned by the agent is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result. The output includes a task_id you can reuse later to continue the same subagent session.
-3. Each agent invocation starts with a fresh context unless you provide task_id to resume the same subagent session (which continues with its previous messages and tool outputs). When starting fresh, your prompt should contain a highly detailed task description for the agent to perform autonomously and you should specify exactly what information the agent should return back to you in its final and only message to you.
-4. The agent's outputs should generally be trusted
-5. Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.), since it is not aware of the user's intent. Tell it how to verify its work if possible (e.g., relevant test commands).
-6. If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first. Use your judgement.
+## When NOT to use the task tool
 
-Example usage (NOTE: The agents below are fictional examples for illustration only - use the actual agents listed above):
+- If you want to read a specific file path, use the `read` tool (or `glob` if you know the pattern) — it is much faster
+- If you are searching for a specific class/function definition like `class Foo`, use `grep` or `glob` directly
+- If you are searching for code within a specific file or set of 2-3 files, use `read` instead
+- For any task that clearly fits another specialized agent's description — use that agent
 
-<example_agent_descriptions>
-"code-reviewer": use this agent after you are done writing a significant piece of code
-"greeting-responder": use this agent when to respond to user greetings with a friendly joke
-</example_agent_description>
+## Usage notes
+
+1. **Launch multiple agents concurrently whenever possible**, to maximize performance: use a single message with multiple tool uses. If the user specifies they want agents to run "in parallel", you MUST send a single message with multiple task tool use blocks.
+
+2. **Each invocation starts with fresh context** unless you pass `task_id` to resume a previous session. When starting fresh, your prompt should contain a highly detailed, self-contained task description and specify exactly what information you expect the agent to return in its final message.
+
+3. **The agent's output is not automatically shown to the user.** When the agent is done, it returns a single final message back to you. To show the user the result, send a text message with a concise summary.
+
+4. **The agent's outputs should generally be trusted**, but spot-check when it matters.
+
+5. **Clearly tell the agent whether you expect it to write code or just research** (search, file reads, web fetches, etc.) — it is not aware of the user's intent. Tell it how to verify its work if possible (e.g., relevant test commands).
+
+6. **If the agent description mentions "use proactively"**, try to use it without the user having to ask. Use your judgment.
+
+## Writing the prompt
+
+Brief the agent like a smart colleague who just walked into the room — it hasn't seen this conversation, doesn't know what you've tried, doesn't understand why this task matters.
+
+- Explain what you're trying to accomplish and why.
+- Describe what you've already learned or ruled out.
+- Give enough context about the surrounding problem that the agent can make judgment calls rather than just following a narrow instruction.
+- If you need a short response, say so ("report in under 200 words").
+- Lookups: hand over the exact command. Investigations: hand over the question — prescribed steps become dead weight when the premise is wrong.
+
+Terse command-style prompts produce shallow, generic work.
+
+**Never delegate understanding.** Don't write "based on your findings, fix the bug" or "based on the research, implement it." Those phrases push synthesis onto the agent instead of doing it yourself. Write prompts that prove you understood: include file paths, line numbers, what specifically to change.
+
+## Example
 
 <example>
 user: "Please write a function that checks if a number is prime"
-assistant: Sure let me write a function that checks if a number is prime
-assistant: First let me use the Write tool to write a function that checks if a number is prime
-assistant: I'm going to use the Write tool to write the following code:
-<code>
-function isPrime(n) {
-  if (n <= 1) return false
-  for (let i = 2; i * i <= n; i++) {
-    if (n % i === 0) return false
-  }
-  return true
-}
-</code>
-<commentary>
-Since a significant piece of code was written and the task was completed, now use the code-reviewer agent to review the code
-</commentary>
-assistant: Now let me use the code-reviewer agent to review the code
-assistant: Uses the Task tool to launch the code-reviewer agent
+assistant: I'll write a prime-checking function, then run a review pass.
+
+*Uses `write` to create the function*
+
+Now let me get a second pair of eyes on this code.
+
+*Uses `task` with subagent_type="general" and prompt: "Review the function isPrime in src/math.ts for correctness, edge cases (n<=1, n=2, non-integers, very large n), and idiomatic style. Return a short list of concrete fixes, if any, with exact locations."*
 </example>
 
 <example>
-user: "Hello"
-<commentary>
-Since the user is greeting, use the greeting-responder agent to respond with a friendly joke
-</commentary>
-assistant: "I'm going to use the Task tool to launch the with the greeting-responder agent"
+user: "Where does the auth token get validated?"
+assistant: <thinking>This is codebase exploration that could touch many files. Use the explore agent.</thinking>
+
+*Uses `task` with subagent_type="explore" and prompt: "Find where authentication tokens are validated in this codebase. Look for JWT verification, session validation, middleware that checks Authorization headers, and any custom token parsing. Return the file:line references for each validation site and a one-line description of what each does. Thoroughness: medium."*
 </example>

@@ -1,5 +1,30 @@
-Load a specialized skill when the task at hand matches one of the skills listed in the system prompt.
+Execute a skill within the main conversation.
 
-Use this tool to inject the skill's instructions and resources into current conversation. The output may contain detailed workflow guidance as well as references to scripts, files, etc in the same directory as the skill.
+When the user asks you to perform a task, check if any available skill matches. Skills provide specialized capabilities, workflows, and domain knowledge — they bundle the exact instructions and references needed to execute a multi-step process well.
 
-The skill name must match one of the skills listed in your system prompt.
+When the user references a "slash command" or "/<something>" (e.g., "/commit", "/review-pr", "/simplify"), they are referring to a skill. Use this tool to invoke it.
+
+## How to invoke
+
+- Use this tool with the `name` argument set to a skill listed in your system prompt's available_skills section.
+- The tool's output contains the skill's full body (instructions, workflow steps) and the list of files in the skill's directory. Follow those instructions directly — do not re-invoke the skill.
+
+## Critical rules
+
+- **BLOCKING REQUIREMENT**: When a skill matches the user's request, invoke this tool BEFORE generating any other response about the task. Do not summarize the skill or plan your approach first — load it, then follow its instructions.
+- **NEVER mention a skill name without actually calling this tool.** If you are going to use a skill, call it. If you are not going to use it, don't bring it up.
+- **Do not invoke a skill that is already loaded** in the current turn. If you see the skill's instructions already present in your context, follow them instead of re-loading.
+- **Do not use this tool for built-in CLI commands** (like `/help`, `/models`, `/clear`, etc.). Those are handled by opencode itself, not by a skill.
+- **Available skills are listed in system-reminder messages** in the conversation. The `name` argument must match exactly one of those skill names.
+
+## When to use
+
+- User types `/commit`, `/simplify`, `/debug`, `/verify`, or any other slash command → invoke the matching skill
+- User describes a task that has a direct skill match by `whenToUse` (surfaced in the skill listing) → invoke it proactively
+- A workflow or specialized domain action is needed, and a skill exists for it
+
+## When NOT to use
+
+- The task is trivial and a skill would add overhead
+- No skill matches the user's intent — do the work directly using other tools
+- The user is asking a question about a skill ("what does /commit do?") — answer from your knowledge of the listing instead of loading it
