@@ -1,6 +1,6 @@
 - Fetches content from a specified URL
 - Takes a URL and optional format as input
-- Fetches the URL content, converts to requested format (markdown by default)
+- Fetches the URL content, converts HTML to the requested format (markdown by default)
 - Returns the content in the specified format
 - Use this tool when you need to retrieve and analyze web content
 
@@ -11,3 +11,6 @@ Usage notes:
   - Format options: "markdown" (default), "text", or "html"
   - This tool is read-only and does not modify any files
   - Results may be summarized if the content is very large
+  - Includes a short self-cleaning cache for faster responses when repeatedly accessing the same URL within the session
+  - **When a URL redirects to a different host**, the tool will tell you. You MUST then immediately make a new webfetch request with the redirect URL provided in the response — do not give up or guess the content.
+  - **For GitHub URLs, prefer using the `gh` CLI via the shell tool** (e.g., `gh pr view`, `gh issue view`, `gh api`) instead of webfetch. GitHub's rendered HTML is noisy and `gh` returns cleaner structured data.
