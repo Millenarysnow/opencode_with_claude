@@ -11,24 +11,38 @@ import PROMPT_KIMI from "./prompt/kimi.txt"
 
 import PROMPT_CODEX from "./prompt/codex.txt"
 import PROMPT_TRINITY from "./prompt/trinity.txt"
+import PROMPT_COPILOT_GPT5 from "./prompt/copilot-gpt-5.txt"
 import type { Provider } from "@/provider/provider"
 import type { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
 import { Skill } from "@/skill"
 
 export function provider(model: Provider.Model) {
-  if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3"))
-    return [PROMPT_BEAST]
-  if (model.api.id.includes("gpt")) {
-    if (model.api.id.includes("codex")) {
-      return [PROMPT_CODEX]
-    }
+  const id = model.api.id.toLowerCase()
+
+  // GitHub Copilot provider: route based on the underlying model family.
+  // Copilot can proxy OpenAI GPT-5/GPT-4, Anthropic Claude, Google Gemini, etc.
+  // We use the Claude-tuned `copilot-gpt-5.txt` for GPT-5/GPT-4 under Copilot
+  // (merges Claude Code's discipline with GPT agentic instructions) and fall
+  // back to the native family prompt for Claude/Gemini so their strengths aren't
+  // muted by a generic GPT prompt.
+  if (model.providerID === "github-copilot") {
+    if (id.includes("claude")) return [PROMPT_ANTHROPIC]
+    if (id.includes("gemini")) return [PROMPT_GEMINI]
+    if (id.includes("gpt-5") || id.includes("gpt-4") || id.includes("o1") || id.includes("o3"))
+      return [PROMPT_COPILOT_GPT5]
+    return [PROMPT_COPILOT_GPT5]
+  }
+
+  if (id.includes("gpt-4") || id.includes("o1") || id.includes("o3")) return [PROMPT_BEAST]
+  if (id.includes("gpt")) {
+    if (id.includes("codex")) return [PROMPT_CODEX]
     return [PROMPT_GPT]
   }
-  if (model.api.id.includes("gemini-")) return [PROMPT_GEMINI]
-  if (model.api.id.includes("claude")) return [PROMPT_ANTHROPIC]
-  if (model.api.id.toLowerCase().includes("trinity")) return [PROMPT_TRINITY]
-  if (model.api.id.toLowerCase().includes("kimi")) return [PROMPT_KIMI]
+  if (id.includes("gemini-")) return [PROMPT_GEMINI]
+  if (id.includes("claude")) return [PROMPT_ANTHROPIC]
+  if (id.includes("trinity")) return [PROMPT_TRINITY]
+  if (id.includes("kimi")) return [PROMPT_KIMI]
   return [PROMPT_DEFAULT]
 }
 
@@ -47,6 +61,7 @@ export const layer = Layer.effect(
     return Service.of({
       environment: Effect.fn("SystemPrompt.environment")(function* (model: Provider.Model) {
         const ctx = yield* InstanceState.context
+        const shell = process.env["SHELL"] || process.env["ComSpec"] || "unknown"
         return [
           [
             `You are powered by the model named ${model.api.id}. The exact model ID is ${model.providerID}/${model.api.id}`,
@@ -56,6 +71,8 @@ export const layer = Layer.effect(
             `  Workspace root folder: ${ctx.worktree}`,
             `  Is directory a git repo: ${ctx.project.vcs === "git" ? "yes" : "no"}`,
             `  Platform: ${process.platform}`,
+            `  OS architecture: ${process.arch}`,
+            `  Shell: ${shell}`,
             `  Today's date: ${new Date().toDateString()}`,
             `</env>`,
           ].join("\n"),
