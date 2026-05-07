@@ -1,13 +1,36 @@
-Use this tool when you have completed the planning phase and are ready to exit plan agent.
+Use this tool when you are in plan mode and have finished writing your plan to the plan file and are ready for user approval.
 
-This tool will ask the user if they want to switch to build agent to start implementing the plan.
+## How This Tool Works
+
+- You should have already written your plan to the plan file specified in the plan-mode system reminder.
+- This tool does NOT take the plan content as a parameter — it reads the plan from the file you wrote.
+- This tool simply signals that you're done planning and ready for the user to review and approve.
+- The user will see the contents of your plan file when they review it.
+
+## When to Use This Tool
+
+IMPORTANT: Only use this tool when the task requires planning the implementation steps of work that requires writing code. For research tasks where you're gathering information, searching files, reading files, or in general trying to understand the codebase — do NOT use this tool.
 
 Call this tool:
 - After you have written a complete plan to the plan file
-- After you have clarified any questions with the user
+- After you have clarified any remaining questions with the user via the `question` tool
 - When you are confident the plan is ready for implementation
 
 Do NOT call this tool:
 - Before you have created or finalized the plan
 - If you still have unanswered questions about the implementation
 - If the user has indicated they want to continue planning
+
+## Before Using This Tool
+
+Ensure your plan is complete and unambiguous:
+- If you have unresolved questions about requirements or approach, use the `question` tool first (in earlier phases).
+- Once your plan is finalized, use THIS tool to request approval.
+
+**Important:** Do NOT use the `question` tool to ask "Is this plan okay?" or "Should I proceed?" — that's exactly what THIS tool does. `plan_exit` inherently requests user approval of your plan.
+
+## Examples
+
+1. Initial task: "Search for and understand the implementation of auth in the codebase" — Do NOT use plan_exit because you are not planning implementation steps.
+2. Initial task: "Help me implement OAuth login" — Use plan_exit after you have finished planning the implementation steps.
+3. Initial task: "Add a new feature to handle user authentication" — If unsure about auth method (OAuth, JWT, etc.), use the `question` tool first, then use plan_exit after clarifying the approach.
