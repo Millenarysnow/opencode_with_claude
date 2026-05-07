@@ -12,6 +12,7 @@ import PROMPT_COMPACTION from "./prompt/compaction.txt"
 import PROMPT_EXPLORE from "./prompt/explore.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
+import PROMPT_VERIFY from "./prompt/verify.txt"
 import { Permission } from "@/permission"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@opencode-ai/core/global"
@@ -183,6 +184,39 @@ export const layer = Layer.effect(
             ),
             description: `Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions.`,
             prompt: PROMPT_EXPLORE,
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          verify: {
+            name: "verify",
+            description:
+              "Adversarial verification specialist. Invoke after non-trivial implementation (3+ file edits, backend/API changes, infrastructure changes) to independently verify that builds, tests, and adversarial probes pass. Pass the ORIGINAL task description, list of files changed, and approach taken. Produces a PASS/FAIL/PARTIAL verdict with evidence.",
+            color: "red",
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                // Verify is read-only for the project: no edits, no installs, no git writes.
+                edit: "deny",
+                write: "deny",
+                apply_patch: "deny",
+                // Verify should not plan or ask questions — it's a verdict tool.
+                todowrite: "deny",
+                plan_enter: "deny",
+                plan_exit: "deny",
+                question: "deny",
+                // Reads / searches / LSP / web / skills stay open (needed to probe the system).
+                read: "allow",
+                grep: "allow",
+                glob: "allow",
+                lsp: "allow",
+                webfetch: "allow",
+                websearch: "allow",
+                skill: "allow",
+              }),
+              user,
+            ),
+            prompt: PROMPT_VERIFY,
             options: {},
             mode: "subagent",
             native: true,
