@@ -174,3 +174,16 @@ The assistant did not use the todo list because this is a single command executi
    - Use clear, descriptive task names
 
 When in doubt, use this tool. Being proactive with task management demonstrates attentiveness and ensures you complete all requirements successfully.
+
+## Verification reminder
+
+When you mark the final todo of a 3+ item list as `completed` and none of the items mentioned verification (e.g. "verify", "tests"), the tool response will append a system NOTE asking you to delegate a verification pass to the `verify` subagent before summarising:
+
+    task({
+      description: "verify <what>",
+      subagent_type: "verify",
+      prompt: "Verify that <feature> works end-to-end: <concrete checks>..."
+    })
+
+Follow that reminder. Listing caveats in your own summary does not count as verification — the verifier runs independent checks and issues an evidence-backed verdict. You can pre-empt the nudge entirely by explicitly adding a verification/testing todo up front.
+
