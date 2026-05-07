@@ -7,7 +7,14 @@ import { Todo } from "../session/todo"
 // here rather than referencing its `.shape` — the LLM-visible JSON Schema is
 // identical, and it removes the last zod dependency from this tool.
 const TodoItem = Schema.Struct({
-  content: Schema.String.annotate({ description: "Brief description of the task" }),
+  content: Schema.String.annotate({ description: "Brief imperative description of the task (e.g. 'Run tests')" }),
+  // Claude-fusion: present-continuous form. Optional for compatibility with
+  // legacy clients; strongly recommended so the UI can show a live active
+  // label while the task is in_progress.
+  activeForm: Schema.optional(Schema.String).annotate({
+    description:
+      "Present-continuous form of the task shown while it is in_progress (e.g. 'Running tests'). Always provide this in addition to content for any non-trivial task.",
+  }),
   status: Schema.String.annotate({
     description: "Current status of the task: pending, in_progress, completed, cancelled",
   }),

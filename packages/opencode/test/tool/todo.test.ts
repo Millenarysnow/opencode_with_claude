@@ -86,3 +86,55 @@ describe("todowrite verification nudge (claude-fusion)", () => {
     expect(NUDGE_TEXT).toContain("task(")
   })
 })
+
+describe("todowrite activeForm (claude-fusion)", () => {
+  // These tests assert the parameters schema accepts activeForm and that the
+  // field survives round-trip into the Todo.Info type. The full tool.execute
+  // path is covered indirectly via the session-level integration tests.
+  test("Parameters schema accepts activeForm", async () => {
+    const { Parameters } = await import("../../src/tool/todo")
+    const { Schema } = await import("effect")
+    const decoded = Schema.decodeUnknownSync(Parameters)({
+      todos: [
+        {
+          content: "Run the test suite",
+          activeForm: "Running the test suite",
+          status: "in_progress",
+          priority: "high",
+        },
+      ],
+    })
+    expect(decoded.todos[0]).toMatchObject({
+      content: "Run the test suite",
+      activeForm: "Running the test suite",
+    })
+  })
+
+  test("Parameters schema accepts todos WITHOUT activeForm (back-compat)", async () => {
+    const { Parameters } = await import("../../src/tool/todo")
+    const { Schema } = await import("effect")
+    const decoded = Schema.decodeUnknownSync(Parameters)({
+      todos: [
+        {
+          content: "Legacy task",
+          status: "pending",
+          priority: "medium",
+        },
+      ],
+    })
+    expect(decoded.todos[0].content).toBe("Legacy task")
+    expect(decoded.todos[0].activeForm).toBeUndefined()
+  })
+
+  test("Todo.Info schema also accepts activeForm", async () => {
+    const { Todo } = await import("../../src/session/todo")
+    const { Schema } = await import("effect")
+    const decoded = Schema.decodeUnknownSync(Todo.Info)({
+      content: "Building",
+      activeForm: "Building",
+      status: "in_progress",
+      priority: "high",
+    })
+    expect(decoded.activeForm).toBe("Building")
+  })
+})

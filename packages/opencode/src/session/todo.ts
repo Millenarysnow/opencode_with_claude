@@ -11,7 +11,16 @@ import { asc } from "drizzle-orm"
 import { TodoTable } from "./session.sql"
 
 export const Info = Schema.Struct({
-  content: Schema.String.annotate({ description: "Brief description of the task" }),
+  content: Schema.String.annotate({ description: "Brief imperative description of the task (e.g. 'Run tests')" }),
+  // Claude-fusion: optional present-continuous form shown while the task is
+  // in_progress. Not persisted to the TodoTable (DB schema is unchanged), so
+  // it's round-tripped through the tool output only. Sessions loaded from
+  // storage will see activeForm === undefined; UI layers should fall back to
+  // content in that case.
+  activeForm: Schema.optional(Schema.String).annotate({
+    description:
+      "Present-continuous form of the task shown while it is in_progress (e.g. 'Running tests'). Optional for backwards compatibility.",
+  }),
   status: Schema.String.annotate({
     description: "Current status of the task: pending, in_progress, completed, cancelled",
   }),
@@ -61,6 +70,8 @@ export const layer = Layer.effect(
             .run()
         }),
       )
+      // Publish with activeForm intact so in-memory subscribers (tool output,
+      // UI state) can use it. Persistence drops it.
       yield* bus.publish(Event.Updated, input)
     })
 
@@ -74,6 +85,7 @@ export const layer = Layer.effect(
         content: row.content,
         status: row.status,
         priority: row.priority,
+        // activeForm is not persisted; consumers fall back to content.
       }))
     })
 

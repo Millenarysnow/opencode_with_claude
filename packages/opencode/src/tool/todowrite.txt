@@ -172,6 +172,11 @@ The assistant did not use the todo list because this is a single command executi
    - Create specific, actionable items
    - Break complex tasks into smaller, manageable steps
    - Use clear, descriptive task names
+   - **Always provide BOTH forms** for non-trivial tasks:
+     - `content`: imperative, what needs to be done. Example: `"Fix the authentication bug"`
+     - `activeForm`: present-continuous, shown while the task is `in_progress`. Example: `"Fixing the authentication bug"`
+   - Good pairs: `("Run the test suite", "Running the test suite")`, `("Add dark mode toggle", "Adding dark mode toggle")`, `("Rename getCwd → getCurrentWorkingDirectory", "Renaming getCwd → getCurrentWorkingDirectory")`.
+   - `activeForm` is optional for backwards compatibility, but strongly recommended. When it's missing the UI falls back to content, which reads awkwardly in progress indicators.
 
 When in doubt, use this tool. Being proactive with task management demonstrates attentiveness and ensures you complete all requirements successfully.
 
