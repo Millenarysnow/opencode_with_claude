@@ -1,0 +1,93 @@
+---
+name: skillify
+description: Capture the current session's repeatable process as a new opencode skill (SKILL.md) so it can be invoked later via `/<skill-name>`.
+---
+
+# Skillify: Turn this session into a reusable skill
+
+You are capturing this session's repeatable process as a reusable skill.
+
+## Step 1: Analyze the session
+
+Before asking any questions, analyze what happened:
+- What repeatable process was performed?
+- What were the inputs/parameters?
+- What are the distinct steps, in order?
+- What are the success criteria for each step (e.g. not just "wrote code," but "PR opened with CI passing")?
+- Where did the user correct or steer the process? Those are hard rules.
+- Which tools and permissions were needed?
+- Which agents (if any) were used?
+
+## Step 2: Interview the user via the `question` tool
+
+Use the `question` tool for ALL clarification questions — never plain text.
+
+**Round 1: High-level confirmation**
+- Propose a `name` (lowercase, hyphen-separated) and a one-line `description`.
+- Confirm the goal and success criteria.
+
+**Round 2: Structure**
+- Present the high-level steps you identified as a numbered list; say you'll detail them in the next round.
+- If the skill needs arguments (e.g. `/review-pr 123`), propose them.
+- Ask where to save the skill:
+  - **This project** → `.opencode/skill/<name>/SKILL.md` (scoped to this repo)
+  - **User global** → `~/.claude/skills/<name>/SKILL.md` (follows the user across all repos — opencode reads this location)
+- If unclear whether the skill should run inline (in the current turn) or forked (as a subagent), ask.
+
+**Round 3: Per-step details (only if non-obvious)**
+For each major step, ask any of these when unclear:
+- What does this step produce that later steps need? (data, artifacts, IDs)
+- What proves this step succeeded?
+- Should the user confirm before proceeding? (Especially for irreversible ops: merges, sends, destructive commands.)
+- Are any steps independent and could run in parallel?
+
+IMPORTANT: Pay special attention to places where the user corrected you during the session — they often indicate hard rules.
+
+Stop interviewing once you have enough. Don't over-ask for simple processes.
+
+## Step 3: Write the SKILL.md
+
+Use this format (opencode's skill frontmatter uses `name` and `description`; a richer `when_to_use` field can go in the body):
+
+```markdown
+---
+name: <skill-name>
+description: <one-line description shown in the skill list>
+---
+
+# <Skill Title>
+
+## When to use
+<detailed description of when the model should auto-invoke this skill. Include trigger phrases and example user messages. Example: "Use when the user wants to cherry-pick a PR to a release branch. Triggers: 'cherry-pick to release', 'CP this PR', 'hotfix'.">
+
+## Inputs (optional)
+- `$arg_name`: what this input means
+
+## Goal
+Stated goal for this workflow. Best with clearly defined artifacts or criteria for completion.
+
+## Steps
+
+### 1. Step Name
+What to do. Be specific and actionable. Include commands when appropriate.
+**Success criteria**: REQUIRED on every step. What shows the step is done and we can move on.
+
+### 2. Step Name
+...
+```
+
+**Step annotations** (optional, use only when they add value):
+- **Success criteria**: REQUIRED on every step.
+- **Execution mode**: `Direct` (default, runs inline), `Task` (spawn a subagent), `[human]` (user does it).
+- **Artifacts**: data produced for later steps (e.g. PR number, commit SHA).
+- **Human checkpoint**: when to pause for user confirmation.
+- **Rules**: hard constraints from user corrections.
+
+## Step 4: Confirm and save
+
+Before writing the file, show the complete SKILL.md as a fenced code block so the user can review it. Then use the `question` tool with one concise question: "Save this skill?" (do not use a `body` field — keep it short).
+
+After writing:
+- Tell the user where the file was saved.
+- Tell them how to invoke it: `/<skill-name>` (optionally with arguments).
+- Note that they can edit the SKILL.md directly to refine it.

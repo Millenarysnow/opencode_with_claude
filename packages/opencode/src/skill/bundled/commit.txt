@@ -1,0 +1,73 @@
+---
+name: commit
+description: Create a git commit with the staged/changed work, drafting a message that follows the repo's conventions.
+---
+
+# Commit: Create a Git Commit
+
+Create a git commit for the current changes. Follow the repository's existing conventions — do not invent your own style.
+
+## Git Safety Protocol (MUST follow)
+
+- NEVER update the git config.
+- NEVER run destructive git commands (`push --force`, `reset --hard`, `checkout .`, `restore .`, `clean -f`, `branch -D`) unless the user explicitly requests them.
+- NEVER skip hooks (`--no-verify`, `--no-gpg-sign`) unless the user explicitly requests it.
+- NEVER force-push to `main` or `master`.
+- **Always create a NEW commit rather than amending**, unless the user explicitly asks for `--amend`. When a pre-commit hook fails, the commit did NOT happen — so `--amend` would modify a PREVIOUS commit. Fix the issue, re-stage, create a new commit.
+- When staging, prefer adding specific files by name rather than `git add -A` or `git add .` — those can accidentally include `.env`, credentials, or large binaries.
+- **NEVER commit unless the user explicitly asks you to.** It is VERY IMPORTANT to only commit when asked.
+
+## Workflow
+
+### 1. Gather context (run in parallel via the `shell` tool)
+
+Run these three commands in a single message (parallel tool calls):
+- `git status` — see untracked files. Do NOT use `-uall` (memory issues on large repos).
+- `git diff` — see both staged and unstaged changes.
+- `git log --oneline -20` — see recent commit messages so your draft follows the repo's style.
+
+### 2. Analyze and draft a commit message
+
+- Summarize the nature of the changes (new feature / enhancement / bug fix / refactor / test / docs).
+  - "add" = a wholly new feature
+  - "update" = enhancement to an existing feature
+  - "fix" = a bug fix
+  - "refactor" = no behavior change
+- Do NOT commit files that likely contain secrets (`.env`, `credentials.json`). Warn the user if they specifically requested those files.
+- Draft a concise (1-2 sentences) message that focuses on the "why" rather than the "what".
+- Match the repo's existing commit style: imperative mood vs past tense, subject length, Conventional Commits prefix, etc. Look at the recent log.
+
+### 3. Stage and commit (run in parallel where possible)
+
+- `git add <specific paths>` — add the files to commit.
+- `git commit -m "$(cat <<'EOF' ... EOF)"` — create the commit using a HEREDOC so multi-line messages survive shell quoting.
+- `git status` — verify the commit landed. This depends on the commit, so run it sequentially after.
+
+### 4. Handle hook failures
+
+If the commit fails due to a pre-commit hook:
+1. Read the hook's error output.
+2. Fix the underlying issue (don't bypass the hook).
+3. Re-stage the fix.
+4. Create a NEW commit (not `--amend`).
+
+## Example commit command
+
+```bash
+git commit -m "$(cat <<'EOF'
+fix(session): prevent cache busting when MCP servers connect mid-query
+
+The dynamic agent list attachment was fragmenting the system-prompt
+prefix cache whenever an MCP client reconnected. Move it to a delta
+message instead.
+EOF
+)"
+```
+
+## Important notes
+
+- Never run additional exploration commands (no `read`, no `grep`) during the commit workflow beyond the three git commands above. The message should reflect what's in the diff, not a new investigation.
+- Do NOT use the `task` tool or `todowrite` during commit — it's a single concrete operation.
+- Do NOT push to the remote unless the user explicitly asks.
+- Never use `git` with `-i` (interactive) flags — they hang.
+- If there are no changes (no untracked files, no modifications), don't create an empty commit. Tell the user.

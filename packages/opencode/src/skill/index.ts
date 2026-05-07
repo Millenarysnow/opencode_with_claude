@@ -17,6 +17,8 @@ import { ConfigMarkdown } from "@/config/markdown"
 import { Glob } from "@opencode-ai/core/util/glob"
 import * as Log from "@opencode-ai/core/util/log"
 import { Discovery } from "./discovery"
+import { BUNDLED_SKILLS } from "./bundled"
+import matter from "gray-matter"
 
 const log = Log.create({ service: "skill" })
 const CLAUDE_EXTERNAL_DIR = ".claude"
@@ -212,6 +214,28 @@ const loadSkills = Effect.fnUntraced(function* (state: State, discovered: Discov
   log.info("init", { count: Object.keys(state.skills).length })
 })
 
+// Register opencode's built-in (bundled) skills into the skill registry.
+// These ship as `.txt` files in `./bundled/` and are always available.
+// Disabled by Flag.OPENCODE_DISABLE_BUNDLED_SKILLS for users who want a pristine registry.
+function registerBundled(s: State) {
+  if (Flag.OPENCODE_DISABLE_BUNDLED_SKILLS) return
+  for (const { id, source } of BUNDLED_SKILLS) {
+    const md = matter(source)
+    const name = typeof md.data.name === "string" ? md.data.name : id
+    const description = typeof md.data.description === "string" ? md.data.description : ""
+    if (name !== id) {
+      log.warn("bundled skill name mismatch", { id, name })
+    }
+    s.skills[name] = {
+      name,
+      description,
+      // Virtual URL so the skill tool has something stable to attribute it to.
+      location: `opencode-bundled://${name}.md`,
+      content: md.content,
+    }
+  }
+}
+
 export class Service extends Context.Service<Service, Interface>()("@opencode/Skill") {}
 
 export const layer = Layer.effect(
@@ -230,6 +254,10 @@ export const layer = Layer.effect(
     const state = yield* InstanceState.make(
       Effect.fn("Skill.state")(function* () {
         const s: State = { skills: {}, dirs: new Set() }
+        // Register bundled built-in skills first (simplify / verify / commit / etc).
+        // On-disk skills with the same name will overwrite these at loadSkills time,
+        // which is intentional — user overrides win.
+        registerBundled(s)
         yield* loadSkills(s, yield* InstanceState.get(discovered), bus)
         return s
       }),

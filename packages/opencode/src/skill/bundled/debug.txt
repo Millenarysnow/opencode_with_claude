@@ -1,0 +1,68 @@
+---
+name: debug
+description: Diagnose a bug by reading the code, forming a hypothesis, and verifying it before writing a fix.
+---
+
+# Debug: Systematic Bug Diagnosis
+
+Diagnose the reported issue by finding the root cause, not just the symptom.
+
+## Step 1: Reproduce or understand the report
+
+- If the user pasted an error (stack trace, log snippet, screenshot of output), read it carefully. Identify the exact file/line/function the failure originates from.
+- If the user described the symptom in natural language, ask yourself: what is the smallest set of inputs / conditions that would produce this behavior?
+- If the bug is not yet reproduced, determine how to reproduce it: the command, the input, the environment. Either run it yourself or ask the user for the exact repro steps.
+
+Do NOT start "fixing" before you can name what's broken and why.
+
+## Step 2: Narrow to the suspect code
+
+Use `grep` (with `-A`/`-B`/`-C` context when helpful), `glob`, and `read` to locate:
+- The function in the stack trace
+- Its callers
+- Its test file (if one exists) — existing tests often encode expected behavior
+- Recent changes to the area (`git log -p -- <path>` or `git blame`)
+
+Prefer parallel searches (one message, multiple tool calls) over sequential drilling.
+
+## Step 3: Form a hypothesis
+
+State, in one sentence, what you think is wrong and why. Examples:
+- "The session id is null when X happens because loadSession is called before Y is ready."
+- "The race occurs because A increments B without locking the map."
+- "The regex does not escape `.` so it over-matches."
+
+If you can't state this clearly, keep investigating.
+
+## Step 4: Verify the hypothesis
+
+Before writing a fix, confirm the hypothesis:
+- Add a temporary log or assertion and reproduce — does the observed state match your story?
+- Trace through the code path by hand with the exact inputs from the repro.
+- Look for the same pattern elsewhere in the codebase — if this were a real bug, would it affect other paths too?
+
+If the hypothesis is wrong, go back to Step 2 with what you learned. Don't just write more code.
+
+## Step 5: Root-cause fix, not a bandaid
+
+Prefer fixing the cause over masking the symptom:
+- Don't add a `try/catch` that swallows errors.
+- Don't silently default a value that should have been set.
+- Don't check `if (x != null)` everywhere when you could ensure `x` is never null at the source.
+
+A real fix often improves related code. A bandaid tends to shift the bug elsewhere.
+
+## Step 6: Verify the fix
+
+After applying the fix:
+- Re-run the original repro — confirm the symptom is gone.
+- Run the project's test suite — ensure no regressions.
+- If the bug had a clear test case but the suite missed it, add a test that reproduces the original failure (so future regressions are caught).
+
+## Reporting
+
+When reporting back:
+- State the root cause in one sentence.
+- Show the file:line of the fix.
+- Mention the verification you ran (test command + result).
+- Note any related code that might have the same bug but you chose not to change — flag it for follow-up rather than silently patch.

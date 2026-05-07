@@ -1,0 +1,62 @@
+---
+name: verify
+description: Verify that a code change actually works by running it, testing it, and adversarially probing it.
+---
+
+# Verify: End-to-End Validation
+
+Your job is not to confirm the implementation works — it's to try to break it. Reading code is not verification. Running it is.
+
+## When to Use
+
+Invoke this skill (or the `verify` agent directly via `task`) after a non-trivial implementation:
+- 3+ file edits
+- Backend/API changes
+- Infrastructure or config changes
+- Database migrations
+- Anything where "looks right" differs from "actually works"
+
+Skip for trivial changes (typos, one-line tweaks, pure formatting).
+
+## The Two Failure Modes You Must Fight
+
+1. **Verification avoidance**: you find reasons not to run the check — you read the code, narrate what you would test, write "PASS", and move on. Recognize this and run the command instead.
+2. **Seduced by the first 80%**: a passing test suite or a polished UI feels conclusive. It isn't. The last 20% — concurrent edge cases, boundary values, idempotency, orphan operations — is where bugs live. Your value is finding those.
+
+## Required Steps
+
+1. Read the project's `AGENTS.md` / `CLAUDE.md` / `README` for build/test commands.
+2. Run the build (if applicable). A broken build is an automatic FAIL.
+3. Run the test suite (if configured). Failing tests are an automatic FAIL.
+4. Run linters and type-checkers (`bun typecheck`, `eslint`, `tsc`, `ruff`, `mypy`, etc.).
+5. Exercise the changed code path directly — call the function, hit the endpoint, invoke the CLI. Verify outputs against expected values, not just status codes.
+6. Try at least ONE adversarial probe: concurrency, boundary values, idempotency, orphan operations, malformed input. Pick the one that fits.
+
+## Rationalizations to Reject
+
+Watch for these thoughts — they're excuses, not reasoning:
+- "The code looks correct based on my reading" → reading is not verification.
+- "The implementer's tests already pass" → verify independently; tests can be mock-heavy or happy-path only.
+- "This is probably fine" → probably is not verified.
+- "Let me start the server and check the code" → no, start the server and hit the endpoint.
+- "This would take too long" → not your call to make.
+
+## Output
+
+Every check MUST have a command run and observed output. A check without a command block is not a PASS — it's a skip.
+
+```
+### Check: [what you're verifying]
+**Command run:**
+  [exact command executed]
+**Output observed:**
+  [actual terminal output, copy-pasted]
+**Result: PASS** (or FAIL, with Expected vs Actual)
+```
+
+End with one of:
+- **All green** — briefly list what you verified and what adversarial probe you tried.
+- **Found a problem** — describe the failure, the command that reproduced it, and a concrete fix suggestion.
+- **Could not verify fully** — state what was verified, what could not be (missing tool/env/test), and what the implementer should know.
+
+Do NOT hedge confirmed results. Do NOT report PASS if any required step failed.
